@@ -1,0 +1,50 @@
+name: Maturin & Prefect Workflow
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Register flows
+    runs-on: ubuntu-latest
+    container: prefecthq/prefect:2-python3.12-kubernetes
+    env:
+      PREFECT_API_KEY: ${{ secrets.PREFECT_API_KEY}}
+      DEPLOYMENT_NAME: ${{ vars.DEPLOYMENT_NAME }}
+      FLOW_FILE: ${{ vars.FLOW_FILE }}
+      FLOW_NAME: ${{ vars.FLOW_NAME }}
+      WORK_POOL: ${{ vars.WORK_POOL }}
+      WORK_QUEUE: ${{ vars.WORK_QUEUE }}
+      WORKSPACE: ${{ vars.WORKSPACE }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Install system dependencies
+        run: apt-get update && apt-get install -y curl
+      - name: Install stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+
+      - name: Run cargo check
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+
+      - name: Pip install requirements
+        run: pip install -r requirements.txt
+
+      - name: Build Maturin package wheel
+        run: maturin build --release --out dist
+
+      - name: Install Maturin package
+        run: pip install dist/*.whl
+
+      - name: Authenticate to Prefect dependencies
+        run: prefect cloud login --key $PREFECT_API_KEY --workspace $WORKSPACE
+
+      - name: Register flow
+        run: prefect deployment build $FLOW_FILE:$FLOW_NAME -n $DEPLOYMENT_NAME -q $WORK_QUEUE -p $WORK_POOL -a
